@@ -1,6 +1,19 @@
+# Environment variables and secrets
+.env
+*.pem
+credentials.json
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+venv/
+__pycache__/
+.aws/
+
+# FinAgent: virtualenv, Lambda bundles, SAM artifacts and the MCP auth token (secret)
 .venv/
 .build/
 .aws-sam/
 .mcp_token
-__pycache__/
 samconfig.toml
