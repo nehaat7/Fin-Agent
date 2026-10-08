@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: FinAgent - agentic financial-data assistant (Claude on Bedrock + MCP server on Lambda)
+
+Parameters:
+  ModelId:
+    Type: String
+    Default: us.anthropic.claude-opus-4-6-v1
+    Description: Claude model on Bedrock - inference profile (us.anthropic....) or Messages-API model ID (anthropic....)
+  Effort:
+    Type: String
+    Default: medium
+    AllowedValues: [low, medium, high, xhigh, max]
+  McpAuthToken:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared bearer token the agent uses to call the MCP server
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures: [x86_64]
+    MemorySize: 1024
+    Tracing: Active
+
+Resources:
+  McpServerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Stateless MCP server (Streamable HTTP) exposing yfinance tools
+      CodeUri: .build/mcp_server/
+      Handler: app.handler
+      Timeout: 30
+      Environment:
+        Variables:
+          MCP_AUTH_TOKEN: !Ref McpAuthToken
+          YFINANCE_CACHE_DIR: /tmp
+          HOME: /tmp
+      FunctionUrlConfig:
+        AuthType: NONE
+
+  AgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Claude agent loop over MCP tools + chat UI
+      CodeUri: .build/agent/
+      Handler: app.handler
+      Timeout: 300
+      Environment:
+        Variables:
+          MCP_SERVER_URL: !Sub "${McpServerFunctionUrl.FunctionUrl}mcp"
+          MCP_AUTH_TOKEN: !Ref McpAuthToken
+          MODEL_ID: !Ref ModelId
+          EFFORT: !Ref Effort
+          BEDROCK_REGION: !Ref AWS::Region
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock:InvokeModel
+              Resource: "*"
+      FunctionUrlConfig:
+        AuthType: NONE
+
+  # Public function URLs also need lambda:InvokeFunction granted (scoped to URL invocations).
+  McpServerUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref McpServerFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  AgentUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AgentFunction
+      Action: lambda:InvokeFunction
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  ChatUrl:
+    Description: Open this in a browser to chat with the agent
+    Value: !GetAtt AgentFunctionUrl.FunctionUrl
+  McpServerUrl:
+    Description: MCP endpoint (Streamable HTTP, needs Authorization Bearer token)
+    Value: !Sub "${McpServerFunctionUrl.FunctionUrl}mcp"
